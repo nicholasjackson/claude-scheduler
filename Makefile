@@ -1,5 +1,5 @@
 .PHONY: dev build build-debug clean test test-go test-frontend lint lint-go lint-frontend \
-        build-linux build-windows build-darwin frontend-install generate doctor help
+        build-linux build-windows build-darwin frontend-install frontend-build generate doctor ci help
 
 dev: ## Run in development mode with live reload
 	wails3 dev -config ./build/config.yml
@@ -41,7 +41,12 @@ lint-frontend: ## Run frontend linter
 	cd frontend && npm run lint
 
 frontend-install: ## Install frontend dependencies
-	cd frontend && npm install
+	cd frontend && npm ci
+
+frontend-build: frontend-install ## Build frontend (needed before Go tests)
+	cd frontend && npm run build
+
+ci: frontend-build test lint ## Run full CI checks locally (build frontend, test, lint)
 
 generate: ## Generate Wails JS bindings
 	wails3 generate bindings

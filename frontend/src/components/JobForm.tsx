@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ScheduledJob, IntervalUnit, MCPServer } from "../types";
-import { GetMCPServers, GetMCPServersForJob, SetJobMCPServers } from "../wailsbridge";
+import { GetMCPServers, GetMCPServersForJob } from "../wailsbridge";
 
 interface Props {
   job: ScheduledJob | null;

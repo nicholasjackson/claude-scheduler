@@ -1,0 +1,8 @@
+build/bin/
+bin/
+node_modules/
+frontend/dist/
+frontend/bindings/
+*.syso
+*.exe
+.task/

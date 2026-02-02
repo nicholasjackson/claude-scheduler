@@ -41,10 +41,11 @@ Pre-built binaries for each release are available on the
 |----------|----------|
 | Linux (amd64) | `claude-schedule-linux-amd64` |
 | Windows (amd64) | `claude-schedule-windows-amd64.exe` |
-| macOS (amd64) | `claude-schedule-darwin-amd64` |
+| macOS (amd64) | `claude-schedule-darwin-amd64.zip` |
 
-Download the binary for your platform, make it executable (Linux/macOS: `chmod +x claude-schedule-*`),
-and run it. No installation required.
+- **Linux** -- download, `chmod +x claude-schedule-linux-amd64`, and run.
+- **Windows** -- download and run the `.exe`.
+- **macOS** -- unzip to get `claude-schedule.app`, move it to `/Applications`, and double-click to launch.
 
 ## Prerequisites
 

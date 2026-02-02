@@ -2,7 +2,7 @@ version: '3'
 
 info:
   productName: "Claude Scheduler"
-  productIdentifier: "com.nicholasjackson.claude-schedule"
+  productIdentifier: "com.nicholasjackson.claudescheduler"
   description: "Schedule tasks using Claude Code"
   version: "v0.1.0"
 

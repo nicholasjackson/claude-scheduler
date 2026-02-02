@@ -105,17 +105,34 @@ jobs:
         run: wails3 generate bindings -ts
 
       - name: Build binary
+        if: matrix.goos != 'darwin'
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: ${{ matrix.goos == 'windows' && '0' || '1' }}
         run: go build -trimpath -buildvcs=false -ldflags="-w -s" -o build/bin/claude-schedule${{ matrix.ext }}
 
+      - name: Build macOS .app bundle
+        if: matrix.goos == 'darwin'
+        run: task darwin:package
+
+      - name: Zip macOS .app bundle
+        if: matrix.goos == 'darwin'
+        run: cd bin && zip -r ../claude-schedule-darwin-amd64.zip claude-schedule.app
+
       - name: Upload artifact
+        if: matrix.goos != 'darwin'
         uses: actions/upload-artifact@v4
         with:
           name: claude-schedule-${{ matrix.goos }}-${{ matrix.goarch }}
           path: build/bin/claude-schedule${{ matrix.ext }}
+
+      - name: Upload macOS artifact
+        if: matrix.goos == 'darwin'
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-schedule-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: claude-schedule-darwin-amd64.zip
 
   release:
     needs: build
@@ -135,8 +152,8 @@ jobs:
           mkdir -p release
           cp artifacts/claude-schedule-linux-amd64/claude-schedule release/claude-schedule-linux-amd64
           cp artifacts/claude-schedule-windows-amd64/claude-schedule.exe release/claude-schedule-windows-amd64.exe
-          cp artifacts/claude-schedule-darwin-amd64/claude-schedule release/claude-schedule-darwin-amd64
-          chmod +x release/claude-schedule-linux-amd64 release/claude-schedule-darwin-amd64
+          cp artifacts/claude-schedule-darwin-amd64/claude-schedule-darwin-amd64.zip release/claude-schedule-darwin-amd64.zip
+          chmod +x release/claude-schedule-linux-amd64
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -145,4 +162,4 @@ jobs:
           files: |
             release/claude-schedule-linux-amd64
             release/claude-schedule-windows-amd64.exe
-            release/claude-schedule-darwin-amd64
+            release/claude-schedule-darwin-amd64.zip

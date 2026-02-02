@@ -67,6 +67,7 @@ type cliEvent struct {
 	Message *cliMessage     `json:"message,omitempty"`  // present when Type == "assistant"
 	Content json.RawMessage `json:"content,omitempty"`  // present for tool result events
 	Result  string          `json:"result,omitempty"`   // present when Type == "result"
+	IsError bool            `json:"is_error,omitempty"` // true when Type == "result" and the run failed
 }
 
 // cliMessage mirrors the Anthropic API Message structure embedded in
@@ -106,22 +107,25 @@ func (tb *transcriptBuilder) writeText(text string) {
 }
 
 func (tb *transcriptBuilder) writeToolUse(name string, rawInput json.RawMessage) {
-	tb.buf.WriteString("**Tool: " + name + "**\n")
+	tb.buf.WriteString(`<details style="margin:8px 0;border:1px solid #374151;border-radius:6px;overflow:hidden">`)
+	tb.buf.WriteString(`<summary style="cursor:pointer;padding:6px 10px;background:#1e293b;color:#60a5fa;font-size:13px;font-weight:600">`)
+	tb.buf.WriteString(`Tool: ` + name)
+	tb.buf.WriteString(`</summary>`)
+
 	if len(rawInput) > 0 {
-		// Pretty-print the JSON input.
+		input := string(rawInput)
 		var parsed interface{}
 		if err := json.Unmarshal(rawInput, &parsed); err == nil {
 			if pretty, err := json.MarshalIndent(parsed, "", "  "); err == nil {
-				tb.buf.WriteString("```json\n" + string(pretty) + "\n```\n\n")
-				tb.hasContent = true
-				return
+				input = string(pretty)
 			}
 		}
-		// Fallback: raw JSON.
-		tb.buf.WriteString("```json\n" + string(rawInput) + "\n```\n\n")
-	} else {
-		tb.buf.WriteString("\n")
+		tb.buf.WriteString(`<pre style="margin:0;padding:8px 10px;background:#0f172a;color:#94a3b8;font-size:12px;overflow-x:auto">`)
+		tb.buf.WriteString(input)
+		tb.buf.WriteString(`</pre>`)
 	}
+
+	tb.buf.WriteString("</details>\n\n")
 	tb.hasContent = true
 }
 
@@ -129,7 +133,14 @@ func (tb *transcriptBuilder) writeToolResult(text string) {
 	if text == "" {
 		return
 	}
-	tb.buf.WriteString("**Result:**\n```\n" + text + "\n```\n\n")
+	tb.buf.WriteString(`<details style="margin:8px 0;border:1px solid #374151;border-radius:6px;overflow:hidden">`)
+	tb.buf.WriteString(`<summary style="cursor:pointer;padding:6px 10px;background:#1e293b;color:#a78bfa;font-size:13px;font-weight:600">`)
+	tb.buf.WriteString(`Result`)
+	tb.buf.WriteString(`</summary>`)
+	tb.buf.WriteString(`<pre style="margin:0;padding:8px 10px;background:#0f172a;color:#94a3b8;font-size:12px;overflow-x:auto;white-space:pre-wrap">`)
+	tb.buf.WriteString(text)
+	tb.buf.WriteString(`</pre>`)
+	tb.buf.WriteString("</details>\n\n")
 	tb.hasContent = true
 }
 
@@ -286,9 +297,41 @@ func buildMCPArgs(servers []db.MCPServer) (args []string, cleanup func(), err er
 	return []string{"--mcp-config", f.Name()}, cleanup, nil
 }
 
+// extractError inspects stream-json output lines for a human-readable error
+// message. It prefers the result event (with is_error=true) and falls back to
+// assistant message text.
+func extractError(lines []string) string {
+	var fallback string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var evt cliEvent
+		if err := json.Unmarshal([]byte(line), &evt); err != nil {
+			continue
+		}
+		// The result event carries the best summary on error.
+		if evt.Type == "result" && evt.IsError && evt.Result != "" {
+			return evt.Result
+		}
+		// Capture assistant text as a fallback.
+		if fallback == "" && evt.Type == "assistant" && evt.Message != nil {
+			for _, block := range evt.Message.Content {
+				if block.Type == "text" && block.Text != "" {
+					fallback = block.Text
+					break
+				}
+			}
+		}
+	}
+	return fallback
+}
+
 // runClaude executes the claude CLI with stream-json output and builds a transcript.
 func runClaude(ctx context.Context, args []string) (string, error) {
 	cmd := exec.CommandContext(ctx, "claude", args...)
+	hideWindow(cmd)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -311,11 +354,25 @@ func runClaude(ctx context.Context, args []string) (string, error) {
 	}
 
 	if err := cmd.Wait(); err != nil {
-		errMsg := stderr.String()
-		if errMsg == "" && len(lines) > 0 {
-			errMsg = strings.Join(lines, "\n")
+		// Try to extract a human-readable error from the stream-json output.
+		if msg := extractError(lines); msg != "" {
+			return "", fmt.Errorf("%s", msg)
 		}
-		return "", fmt.Errorf("claude exited with error: %w\n%s", err, errMsg)
+		// Build the most informative error we can from what's available.
+		stderrMsg := strings.TrimSpace(stderr.String())
+		stdout := strings.TrimSpace(strings.Join(lines, "\n"))
+
+		var parts []string
+		if stderrMsg != "" {
+			parts = append(parts, stderrMsg)
+		}
+		if stdout != "" {
+			parts = append(parts, stdout)
+		}
+		if len(parts) == 0 {
+			parts = append(parts, err.Error())
+		}
+		return "", fmt.Errorf("claude: %s", strings.Join(parts, "\n"))
 	}
 
 	transcript := buildTranscript(lines)

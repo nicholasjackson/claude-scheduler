@@ -28,6 +28,13 @@ func resultLine(result string) string {
 	return string(b)
 }
 
+// errorResultLine builds a JSONL line for an error result event.
+func errorResultLine(result string) string {
+	evt := cliEvent{Type: "result", Result: result, IsError: true}
+	b, _ := json.Marshal(evt)
+	return string(b)
+}
+
 // systemLine builds a JSONL line for a system init event.
 func systemLine() string {
 	evt := cliEvent{Type: "system", Subtype: "init"}
@@ -66,7 +73,8 @@ func TestBuildTranscript_ToolUseWithResult(t *testing.T) {
 	}
 
 	got := buildTranscript(lines)
-	require.Contains(t, got, "**Tool: Bash**")
+	require.Contains(t, got, "Tool: Bash")
+	require.Contains(t, got, "<details")
 	require.Contains(t, got, `"command": "ls"`)
 	require.Contains(t, got, "Here are the files.")
 }
@@ -90,7 +98,8 @@ func TestBuildTranscript_MixedTextAndTool(t *testing.T) {
 
 	got := buildTranscript(lines)
 	require.Contains(t, got, "Let me check.")
-	require.Contains(t, got, "**Tool: Read**")
+	require.Contains(t, got, "Tool: Read")
+	require.Contains(t, got, "<details")
 	require.Contains(t, got, "Here is the file.")
 }
 
@@ -121,9 +130,10 @@ func TestBuildTranscript_ToolWithEmptyInput(t *testing.T) {
 	}
 
 	got := buildTranscript(lines)
-	require.Contains(t, got, "**Tool: WebSearch**")
-	// No json code block since input is empty.
-	require.NotContains(t, got, "```json")
+	require.Contains(t, got, "Tool: WebSearch")
+	require.Contains(t, got, "<details")
+	// No pre block since input is empty.
+	require.NotContains(t, got, "<pre")
 }
 
 func TestBuildTranscript_ResultDiffersFromText(t *testing.T) {
@@ -150,6 +160,52 @@ func TestBuildTranscript_IgnoresSystemEvents(t *testing.T) {
 	got := buildTranscript(lines)
 	require.Equal(t, "hello", got)
 	require.NotContains(t, got, "system")
+}
+
+func TestExtractError_AuthFailure(t *testing.T) {
+	lines := []string{
+		systemLine(),
+		assistantLine(cliContentBlock{
+			Type: "text",
+			Text: `API Error: 401 · Please run /login`,
+		}),
+		errorResultLine(`API Error: 401 · Please run /login`),
+	}
+
+	got := extractError(lines)
+	require.Contains(t, got, "Please run /login")
+}
+
+func TestExtractError_FallsBackToAssistantText(t *testing.T) {
+	// Result event present but not marked as error — fall back to assistant text.
+	lines := []string{
+		systemLine(),
+		assistantLine(cliContentBlock{
+			Type: "text",
+			Text: "Something went wrong",
+		}),
+	}
+
+	got := extractError(lines)
+	require.Equal(t, "Something went wrong", got)
+}
+
+func TestExtractError_EmptyOutput(t *testing.T) {
+	got := extractError(nil)
+	require.Equal(t, "", got)
+
+	got = extractError([]string{})
+	require.Equal(t, "", got)
+}
+
+func TestExtractError_PrefersResultOverAssistant(t *testing.T) {
+	lines := []string{
+		assistantLine(cliContentBlock{Type: "text", Text: "verbose error details"}),
+		errorResultLine("Token expired. Please run /login"),
+	}
+
+	got := extractError(lines)
+	require.Equal(t, "Token expired. Please run /login", got)
 }
 
 func TestBuildMCPArgs_NoServers(t *testing.T) {

@@ -50,6 +50,10 @@ export function SetJobMCPServers(jobId: string, serverIds: string[]): Promise<vo
   return Call.ByName("main.App.SetJobMCPServers", jobId, serverIds);
 }
 
+export function RunJobNow(jobId: string): Promise<void> {
+  return Call.ByName("main.App.RunJobNow", jobId);
+}
+
 // Event helpers wrapping the v3 Events API.
 export function OnEvent(name: string, callback: (data: unknown) => void): () => void {
   return Events.On(name, callback);

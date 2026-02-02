@@ -7,6 +7,7 @@ import RunHistory from "./RunHistory";
 interface Props {
   job: ScheduledJob | null;
   onEdit: () => void;
+  onRunNow: (jobId: string) => void;
 }
 
 const statusLabels: Record<string, { text: string; color: string }> = {
@@ -16,7 +17,7 @@ const statusLabels: Record<string, { text: string; color: string }> = {
   pending: { text: "Pending", color: "text-gray-400" },
 };
 
-export default function JobDetail({ job, onEdit }: Props) {
+export default function JobDetail({ job, onEdit, onRunNow }: Props) {
   const promptHtml = useMemo(() => {
     if (!job?.prompt) return "";
     return marked.parse(job.prompt, { async: false }) as string;
@@ -41,6 +42,17 @@ export default function JobDetail({ job, onEdit }: Props) {
             <span className={`text-sm font-medium ${status.color}`}>
               {status.text}
             </span>
+            <button
+              onClick={() => onRunNow(job.id)}
+              disabled={job.status === "running"}
+              className={`text-sm px-2 py-1 rounded border transition-colors ${
+                job.status === "running"
+                  ? "text-gray-500 border-gray-700 cursor-not-allowed"
+                  : "text-green-400 hover:text-green-300 border-gray-600 hover:border-gray-500"
+              }`}
+            >
+              Run Now
+            </button>
             <button
               onClick={onEdit}
               className="text-sm text-blue-400 hover:text-blue-300 px-2 py-1 rounded border border-gray-600 hover:border-gray-500 transition-colors"

@@ -148,3 +148,8 @@ func (a *App) GetMCPServersForJob(jobID string) ([]db.MCPServer, error) {
 func (a *App) SetJobMCPServers(jobID string, serverIDs []string) error {
 	return a.store.SetJobMCPServers(jobID, serverIDs)
 }
+
+// RunJobNow triggers immediate execution of a job.
+func (a *App) RunJobNow(jobID string) error {
+	return a.sched.RunNow(jobID)
+}

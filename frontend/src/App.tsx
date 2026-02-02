@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { GetJobs, CreateJob, UpdateJob, SetJobMCPServers, OnEvent } from "./wailsbridge";
+import { GetJobs, CreateJob, UpdateJob, SetJobMCPServers, RunJobNow, OnEvent } from "./wailsbridge";
 import { ScheduledJob } from "./types";
 import { useToasts } from "./hooks/useToasts";
 import JobList from "./components/JobList";
@@ -80,6 +80,15 @@ function App() {
     setViewMode("edit");
   };
 
+  const handleRunNow = async (jobId: string) => {
+    try {
+      await RunJobNow(jobId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      addToast(message, "error");
+    }
+  };
+
   const handleSaveJob = async (job: ScheduledJob, mcpServerIds: string[]) => {
     setSaveError(null);
     try {
@@ -140,7 +149,7 @@ function App() {
           <JobForm job={selectedJob} onSave={handleSaveJob} onCancel={handleCancelForm} saveError={saveError} />
         )}
         {viewMode === "detail" && (
-          <JobDetail job={selectedJob} onEdit={handleEditJob} />
+          <JobDetail job={selectedJob} onEdit={handleEditJob} onRunNow={handleRunNow} />
         )}
       </div>
       <ToastContainer toasts={toasts} onDismiss={removeToast} />

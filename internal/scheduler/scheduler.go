@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -221,6 +222,26 @@ func (s *Scheduler) notify(jobName string, status string) {
 	if s.notifyFn != nil {
 		s.notifyFn(jobName, status)
 	}
+}
+
+// RunNow triggers immediate execution of the given job in the background.
+// Returns an error if the job is already running.
+func (s *Scheduler) RunNow(jobID string) error {
+	job, err := s.store.GetJob(jobID)
+	if err != nil {
+		return err
+	}
+	if job.Status == "running" {
+		return fmt.Errorf("job is already running")
+	}
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.executeJob(&job, time.Now().UTC())
+	}()
+
+	return nil
 }
 
 // intervalDuration converts the stored interval value+unit to a time.Duration.

@@ -101,8 +101,9 @@ func (tb *transcriptBuilder) writeText(text string) {
 	if text == "" {
 		return
 	}
+	tb.buf.WriteString(`<div style="margin:8px 0;padding:8px 12px;border-left:3px solid #22d3ee;background:#0f172a;border-radius:4px;color:#e2e8f0;font-size:13px;line-height:1.5">`)
 	tb.buf.WriteString(text)
-	tb.buf.WriteString("\n\n")
+	tb.buf.WriteString("</div>\n\n")
 	tb.hasContent = true
 }
 
@@ -149,7 +150,11 @@ func (tb *transcriptBuilder) writeSummary(text string) {
 	if text == "" {
 		return
 	}
-	tb.buf.WriteString("---\n\n## Summary\n\n" + text + "\n")
+	tb.buf.WriteString(`<hr style="border-color:#374151;margin:16px 0">`)
+	tb.buf.WriteString(`<div style="margin:8px 0;padding:10px 12px;border-left:3px solid #34d399;background:#0f172a;border-radius:4px;color:#e2e8f0;font-size:13px;line-height:1.5">`)
+	tb.buf.WriteString(`<strong style="color:#34d399">Summary</strong><br>`)
+	tb.buf.WriteString(text)
+	tb.buf.WriteString("</div>\n")
 	tb.hasContent = true
 }
 
@@ -205,9 +210,8 @@ func buildTranscript(lines []string) string {
 	// already captured (avoids duplication when the result just echoes
 	// the last assistant text).
 	if lastResult != "" {
-		existing := tb.build()
 		trimmedResult := strings.TrimSpace(lastResult)
-		if existing != trimmedResult {
+		if !strings.Contains(tb.build(), trimmedResult) {
 			tb.writeSummary(lastResult)
 		}
 	}

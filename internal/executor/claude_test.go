@@ -52,7 +52,7 @@ func TestBuildTranscript_TextOnly(t *testing.T) {
 	got := buildTranscript(lines)
 	require.Contains(t, got, "Hello world")
 	// Result should NOT duplicate when it matches assistant text.
-	require.NotContains(t, got, "## Summary")
+	require.NotContains(t, got, "Summary")
 }
 
 func TestBuildTranscript_ToolUseWithResult(t *testing.T) {
@@ -146,7 +146,7 @@ func TestBuildTranscript_ResultDiffersFromText(t *testing.T) {
 
 	got := buildTranscript(lines)
 	require.Contains(t, got, "Let me look into that.")
-	require.Contains(t, got, "## Summary")
+	require.Contains(t, got, ">Summary</")
 	require.Contains(t, got, "The answer is 42.")
 }
 
@@ -158,8 +158,9 @@ func TestBuildTranscript_IgnoresSystemEvents(t *testing.T) {
 	}
 
 	got := buildTranscript(lines)
-	require.Equal(t, "hello", got)
+	require.Contains(t, got, "hello")
 	require.NotContains(t, got, "system")
+	require.NotContains(t, got, "Summary")
 }
 
 func TestExtractError_AuthFailure(t *testing.T) {

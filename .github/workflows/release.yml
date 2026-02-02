@@ -112,3 +112,33 @@ jobs:
         with:
           name: claude-schedule-${{ matrix.goos }}-${{ matrix.goarch }}
           path: build/bin/claude-schedule${{ matrix.ext }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          cp artifacts/claude-schedule-linux-amd64/claude-schedule release/claude-schedule-linux-amd64
+          cp artifacts/claude-schedule-windows-amd64/claude-schedule.exe release/claude-schedule-windows-amd64.exe
+          cp artifacts/claude-schedule-darwin-amd64/claude-schedule release/claude-schedule-darwin-amd64
+          chmod +x release/claude-schedule-linux-amd64 release/claude-schedule-darwin-amd64
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release/claude-schedule-linux-amd64
+            release/claude-schedule-windows-amd64.exe
+            release/claude-schedule-darwin-amd64

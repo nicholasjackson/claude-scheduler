@@ -44,7 +44,7 @@ function RunOutput({ output }: { output: string }) {
 
   return (
     <div
-      className="border-t border-gray-700 px-3 py-2 max-h-80 overflow-y-auto prose prose-invert prose-sm max-w-none"
+      className="border-t border-gray-700 px-3 py-2 max-h-80 overflow-y-auto text-sm text-gray-300"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

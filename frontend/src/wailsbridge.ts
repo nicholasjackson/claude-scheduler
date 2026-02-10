@@ -54,6 +54,10 @@ export function RunJobNow(jobId: string): Promise<void> {
   return Call.ByName("main.App.RunJobNow", jobId);
 }
 
+export function AnswerQuestion(jobId: string, answer: string): Promise<void> {
+  return Call.ByName("main.App.AnswerQuestion", jobId, answer);
+}
+
 // Event helpers wrapping the v3 Events API.
 export function OnEvent(name: string, callback: (data: unknown) => void): () => void {
   return Events.On(name, callback);

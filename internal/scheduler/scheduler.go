@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"claude-schedule/internal/db"
+	"claude-schedule/internal/executor"
 )
 
 // EmitFunc is the signature for a Wails-style event emitter.
@@ -17,8 +18,11 @@ type EmitFunc func(eventName string, data ...interface{})
 type NotifyFunc func(jobName string, status string)
 
 // ExecuteFunc defines how a job is executed. It receives the job and its
-// associated MCP servers, and returns output text and an error (nil on success).
-type ExecuteFunc func(ctx context.Context, job db.Job, mcpServers []db.MCPServer) (string, error)
+// associated MCP servers, and returns an ExecuteResult and an error.
+type ExecuteFunc func(ctx context.Context, job db.Job, mcpServers []db.MCPServer) (executor.ExecuteResult, error)
+
+// AnswerFunc defines how a question answer is sent back to Claude.
+type AnswerFunc func(ctx context.Context, job db.Job, mcpServers []db.MCPServer, answer string) (executor.ExecuteResult, error)
 
 // Scheduler polls the database at a fixed interval and runs due jobs sequentially.
 type Scheduler struct {
@@ -26,6 +30,7 @@ type Scheduler struct {
 	emitFn   EmitFunc
 	notifyFn NotifyFunc
 	execFn   ExecuteFunc
+	answerFn AnswerFunc
 	interval time.Duration
 
 	ctx    context.Context
@@ -43,6 +48,7 @@ func New(store *db.Store, emitFn EmitFunc, execFn ExecuteFunc, interval time.Dur
 		store:    store,
 		emitFn:   emitFn,
 		execFn:   execFn,
+		answerFn: executor.ClaudeAnswer,
 		interval: interval,
 	}
 }
@@ -121,7 +127,7 @@ func isDue(job db.Job, now time.Time) bool {
 	if !job.Active {
 		return false
 	}
-	if job.Status == "running" {
+	if job.Status == "running" || job.Status == "waiting" {
 		return false
 	}
 
@@ -148,10 +154,56 @@ func isDue(job db.Job, now time.Time) bool {
 	return !refTime.Add(interval).After(now)
 }
 
+// finishExecution processes the result of a CLI invocation, detecting questions
+// and updating job/run state accordingly.
+func (s *Scheduler) finishExecution(job *db.Job, run *db.JobRun, result executor.ExecuteResult, execErr error) {
+	if execErr != nil {
+		job.Status = "failed"
+		job.Output = execErr.Error()
+		job.PendingQuestion = ""
+	} else {
+		// Check for a pending question in the raw output.
+		question := executor.DetectQuestion(result.RawLines)
+		if question != "" {
+			job.Status = "waiting"
+			job.Output = result.Transcript
+			job.PendingQuestion = question
+		} else {
+			job.Status = "success"
+			job.Output = result.Transcript
+			job.PendingQuestion = ""
+		}
+	}
+
+	if _, err := s.store.UpdateJob(*job); err != nil {
+		log.Printf("scheduler: failed to update job %s after execution: %v", job.ID, err)
+	}
+
+	// Update the run record.
+	if run != nil && run.ID != "" {
+		run.Status = job.Status
+		run.Output = job.Output
+		run.PendingQuestion = job.PendingQuestion
+		if job.Status != "waiting" {
+			run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+		}
+		if err := s.store.UpdateRun(*run); err != nil {
+			log.Printf("scheduler: failed to update run %s: %v", run.ID, err)
+		}
+		if err := s.store.PruneRuns(job.ID); err != nil {
+			log.Printf("scheduler: failed to prune runs for job %s: %v", job.ID, err)
+		}
+	}
+
+	s.emit()
+	s.notify(job.Name, job.Status)
+}
+
 func (s *Scheduler) executeJob(job *db.Job, now time.Time) {
 	// Mark as running.
 	job.Status = "running"
 	job.Output = ""
+	job.PendingQuestion = ""
 	if _, err := s.store.UpdateJob(*job); err != nil {
 		log.Printf("scheduler: failed to mark job %s running: %v", job.ID, err)
 		return
@@ -176,40 +228,14 @@ func (s *Scheduler) executeJob(job *db.Job, now time.Time) {
 	}
 
 	// Execute.
-	output, execErr := s.execFn(s.ctx, *job, mcpServers)
+	result, execErr := s.execFn(s.ctx, *job, mcpServers)
 
-	// Update result.
-	if execErr != nil {
-		job.Status = "failed"
-		job.Output = execErr.Error()
-	} else {
-		job.Status = "success"
-		job.Output = output
-	}
-
+	// Update timing fields.
 	job.LastRun = now.Format(time.RFC3339)
 	interval := intervalDuration(job.IntervalValue, job.IntervalUnit)
 	job.NextRun = now.Add(interval).Format(time.RFC3339)
 
-	if _, err := s.store.UpdateJob(*job); err != nil {
-		log.Printf("scheduler: failed to update job %s after execution: %v", job.ID, err)
-	}
-
-	// Update the run record with final status and output.
-	if run.ID != "" {
-		run.Status = job.Status
-		run.Output = job.Output
-		run.EndedAt = time.Now().UTC().Format(time.RFC3339)
-		if err := s.store.UpdateRun(run); err != nil {
-			log.Printf("scheduler: failed to update run %s: %v", run.ID, err)
-		}
-		if err := s.store.PruneRuns(job.ID); err != nil {
-			log.Printf("scheduler: failed to prune runs for job %s: %v", job.ID, err)
-		}
-	}
-
-	s.emit()
-	s.notify(job.Name, job.Status)
+	s.finishExecution(job, &run, result, execErr)
 }
 
 func (s *Scheduler) emit() {
@@ -244,6 +270,62 @@ func (s *Scheduler) RunNow(jobID string) error {
 	return nil
 }
 
+// AnswerQuestion sends the user's answer to a waiting job and resumes execution.
+func (s *Scheduler) AnswerQuestion(jobID string, answer string) error {
+	job, err := s.store.GetJob(jobID)
+	if err != nil {
+		return err
+	}
+	if job.Status != "waiting" {
+		return fmt.Errorf("job is not waiting for an answer")
+	}
+
+	// Mark as running again.
+	job.Status = "running"
+	job.PendingQuestion = ""
+	if _, err := s.store.UpdateJob(job); err != nil {
+		return fmt.Errorf("updating job status: %w", err)
+	}
+	s.emit()
+
+	// Get the latest run to append output to.
+	run, err := s.store.GetLatestRun(jobID)
+	if err != nil {
+		log.Printf("scheduler: failed to get latest run for job %s: %v", jobID, err)
+	}
+	if run.ID != "" {
+		run.Status = "running"
+		run.PendingQuestion = ""
+		if err := s.store.UpdateRun(run); err != nil {
+			log.Printf("scheduler: failed to update run %s: %v", run.ID, err)
+		}
+	}
+	s.emit()
+
+	// Fetch MCP servers.
+	mcpServers, err := s.store.GetMCPServersForJob(jobID)
+	if err != nil {
+		log.Printf("scheduler: failed to load MCP servers for job %s: %v", jobID, err)
+	}
+
+	// Resume the conversation with the answer.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+
+		result, execErr := s.answerFn(s.ctx, job, mcpServers, answer)
+
+		// Append new output to the existing run output.
+		if run.ID != "" && execErr == nil {
+			result.Transcript = run.Output + "\n\n" + result.Transcript
+		}
+
+		s.finishExecution(&job, &run, result, execErr)
+	}()
+
+	return nil
+}
+
 // intervalDuration converts the stored interval value+unit to a time.Duration.
 func intervalDuration(value int, unit string) time.Duration {
 	switch unit {
@@ -270,11 +352,11 @@ func parseTime(s string) (time.Time, error) {
 }
 
 // mockExecute is the default executor: sleeps for 30 seconds.
-func mockExecute(ctx context.Context, _ db.Job, _ []db.MCPServer) (string, error) {
+func mockExecute(ctx context.Context, _ db.Job, _ []db.MCPServer) (executor.ExecuteResult, error) {
 	select {
 	case <-time.After(30 * time.Second):
-		return "Mock execution completed successfully.", nil
+		return executor.ExecuteResult{Transcript: "Mock execution completed successfully."}, nil
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return executor.ExecuteResult{}, ctx.Err()
 	}
 }

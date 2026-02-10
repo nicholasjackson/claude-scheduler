@@ -8,6 +8,7 @@ import (
 	"runtime"
 
 	"claude-schedule/internal/db"
+	"claude-schedule/internal/executor"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -24,6 +25,7 @@ func main() {
 		log.Fatalf("cannot find config directory: %v", err)
 	}
 	dbPath := filepath.Join(configDir, "claude-schedule", "claude-schedule.db")
+	executor.DebugDir = filepath.Join(configDir, "claude-schedule", "debug")
 
 	store, err := db.Open(dbPath)
 	if err != nil {
@@ -50,8 +52,8 @@ func main() {
 
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "Claude Scheduler",
-		Width:            1024,
-		Height:           768,
+		Width:            1400,
+		Height:           1000,
 		BackgroundColour: application.NewRGB(27, 38, 54),
 		URL:              "/",
 	})

@@ -12,6 +12,7 @@ const statusColors: Record<JobStatus, string> = {
   failed: "bg-red-500",
   running: "bg-yellow-500 animate-pulse",
   pending: "bg-gray-500",
+  waiting: "bg-amber-500 animate-pulse",
 };
 
 export default function JobListItem({ job, isSelected, onSelect }: Props) {

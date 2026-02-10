@@ -144,6 +144,154 @@ export default function MCPSettings({ onClose }: Props) {
   );
 }
 
+function KeyValueEditor({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (json: string) => void;
+}) {
+  const parse = (v: string): { key: string; value: string }[] => {
+    try {
+      const obj = JSON.parse(v);
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        return Object.entries(obj).map(([k, val]) => ({ key: k, value: String(val) }));
+      }
+    } catch { /* ignore */ }
+    return [];
+  };
+
+  const [entries, setEntries] = useState(parse(value));
+
+  const sync = (updated: { key: string; value: string }[]) => {
+    setEntries(updated);
+    const obj: Record<string, string> = {};
+    for (const e of updated) {
+      if (e.key.trim()) obj[e.key.trim()] = e.value;
+    }
+    onChange(JSON.stringify(obj));
+  };
+
+  const update = (idx: number, field: "key" | "value", val: string) => {
+    const next = entries.map((e, i) => (i === idx ? { ...e, [field]: val } : e));
+    sync(next);
+  };
+
+  const remove = (idx: number) => {
+    sync(entries.filter((_, i) => i !== idx));
+  };
+
+  const add = () => {
+    sync([...entries, { key: "", value: "" }]);
+  };
+
+  const rowInputClass =
+    "bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:border-blue-500 focus:outline-none";
+
+  return (
+    <div className="space-y-2">
+      {entries.map((entry, idx) => (
+        <div key={idx} className="flex gap-2 items-center">
+          <input
+            type="text"
+            value={entry.key}
+            onChange={(e) => update(idx, "key", e.target.value)}
+            placeholder="Key"
+            className={rowInputClass + " flex-1"}
+          />
+          <input
+            type="text"
+            value={entry.value}
+            onChange={(e) => update(idx, "value", e.target.value)}
+            placeholder="Value"
+            className={rowInputClass + " flex-[2]"}
+          />
+          <button
+            onClick={() => remove(idx)}
+            className="text-red-400 hover:text-red-300 text-sm px-1.5 py-1 shrink-0"
+          >
+            x
+          </button>
+        </div>
+      ))}
+      <button
+        onClick={add}
+        className="text-xs text-blue-400 hover:text-blue-300"
+      >
+        + Add
+      </button>
+    </div>
+  );
+}
+
+function ListEditor({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (json: string) => void;
+  placeholder?: string;
+}) {
+  const parse = (v: string): string[] => {
+    try {
+      const arr = JSON.parse(v);
+      if (Array.isArray(arr)) return arr.map(String);
+    } catch { /* ignore */ }
+    return [];
+  };
+
+  const [items, setItems] = useState(parse(value));
+
+  const sync = (updated: string[]) => {
+    setItems(updated);
+    onChange(JSON.stringify(updated));
+  };
+
+  const update = (idx: number, val: string) => {
+    sync(items.map((item, i) => (i === idx ? val : item)));
+  };
+
+  const remove = (idx: number) => {
+    sync(items.filter((_, i) => i !== idx));
+  };
+
+  const add = () => {
+    sync([...items, ""]);
+  };
+
+  const rowInputClass =
+    "bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-100 focus:border-blue-500 focus:outline-none";
+
+  return (
+    <div className="space-y-2">
+      {items.map((item, idx) => (
+        <div key={idx} className="flex gap-2 items-center">
+          <input
+            type="text"
+            value={item}
+            onChange={(e) => update(idx, e.target.value)}
+            placeholder={placeholder ?? "Value"}
+            className={rowInputClass + " flex-1"}
+          />
+          <button
+            onClick={() => remove(idx)}
+            className="text-red-400 hover:text-red-300 text-sm px-1.5 py-1 shrink-0"
+          >
+            x
+          </button>
+        </div>
+      ))}
+      <button
+        onClick={add}
+        className="text-xs text-blue-400 hover:text-blue-300"
+      >
+        + Add
+      </button>
+    </div>
+  );
+}
+
 function ServerForm({
   server,
   onSave,
@@ -202,6 +350,7 @@ function ServerForm({
           value={type}
           onChange={(e) => setType(e.target.value as MCPServerType)}
           className={inputClass}
+          style={{ colorScheme: "dark" }}
         >
           <option value="http">HTTP</option>
           <option value="stdio">Stdio</option>
@@ -221,14 +370,8 @@ function ServerForm({
             />
           </div>
           <div>
-            <label className={labelClass}>Headers (JSON)</label>
-            <textarea
-              value={headers}
-              onChange={(e) => setHeaders(e.target.value)}
-              rows={3}
-              placeholder='{"Authorization": "Bearer ..."}'
-              className={inputClass + " resize-y font-mono text-xs"}
-            />
+            <label className={labelClass}>Headers</label>
+            <KeyValueEditor value={headers} onChange={setHeaders} />
           </div>
         </>
       ) : (
@@ -244,27 +387,15 @@ function ServerForm({
             />
           </div>
           <div>
-            <label className={labelClass}>Args (JSON array)</label>
-            <textarea
-              value={args}
-              onChange={(e) => setArgs(e.target.value)}
-              rows={2}
-              placeholder='["-y", "server-package"]'
-              className={inputClass + " resize-y font-mono text-xs"}
-            />
+            <label className={labelClass}>Args</label>
+            <ListEditor value={args} onChange={setArgs} placeholder="-y" />
           </div>
         </>
       )}
 
       <div>
-        <label className={labelClass}>Environment Variables (JSON)</label>
-        <textarea
-          value={env}
-          onChange={(e) => setEnv(e.target.value)}
-          rows={3}
-          placeholder='{"API_KEY": "..."}'
-          className={inputClass + " resize-y font-mono text-xs"}
-        />
+        <label className={labelClass}>Environment Variables</label>
+        <KeyValueEditor value={env} onChange={setEnv} />
       </div>
 
       <div className="flex gap-3 pt-2">

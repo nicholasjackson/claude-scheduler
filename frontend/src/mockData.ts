@@ -19,6 +19,7 @@ export const mockJobs: ScheduledJob[] = [
 [2026-01-31 02:00:16] Uploading to S3 bucket "backups-prod"...
 [2026-01-31 02:00:22] Upload complete.
 [2026-01-31 02:00:22] Backup completed successfully.`,
+    pendingQuestion: "",
   },
   {
     id: "2",
@@ -35,6 +36,7 @@ export const mockJobs: ScheduledJob[] = [
 [2026-01-26 00:00:02] Rotating /var/log/app/access.log
 [2026-01-26 00:00:02] ERROR: Permission denied: /var/log/app/access.log
 [2026-01-26 00:00:02] Log rotation failed with exit code 1.`,
+    pendingQuestion: "",
   },
   {
     id: "3",
@@ -51,6 +53,7 @@ export const mockJobs: ScheduledJob[] = [
 [2026-01-31 14:00:01] Checking API endpoint: https://api.example.com/health
 [2026-01-31 14:00:01] API: OK (response 200, 45ms)
 [2026-01-31 14:00:02] Checking database connectivity...`,
+    pendingQuestion: "",
   },
   {
     id: "4",
@@ -68,6 +71,7 @@ export const mockJobs: ScheduledJob[] = [
 [2026-01-27 08:00:12] Report generated: /reports/weekly_20260127.pdf
 [2026-01-27 08:00:13] Emailing report to team@example.com
 [2026-01-27 08:00:14] Done.`,
+    pendingQuestion: "",
   },
   {
     id: "5",
@@ -81,5 +85,6 @@ export const mockJobs: ScheduledJob[] = [
     lastRun: "2026-01-31T06:00:00Z",
     status: "pending",
     output: "No output yet. Job has not run.",
+    pendingQuestion: "",
   },
 ];

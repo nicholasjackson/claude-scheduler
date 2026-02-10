@@ -69,6 +69,7 @@ export default function JobForm({ job, onSave, onCancel, saveError }: Props) {
         lastRun: job?.lastRun ?? "",
         status: job?.status ?? "pending",
         output: job?.output ?? "",
+        pendingQuestion: job?.pendingQuestion ?? "",
       },
       Array.from(selectedServerIds)
     );

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"claude-schedule/internal/db"
+	"claude-schedule/internal/executor"
 
 	"github.com/stretchr/testify/require"
 )
@@ -47,8 +48,8 @@ func createJob(t *testing.T, store *db.Store, name string, active bool, interval
 
 // fastExec returns an executor that completes instantly.
 func fastExec() ExecuteFunc {
-	return func(_ context.Context, _ db.Job, _ []db.MCPServer) (string, error) {
-		return "done", nil
+	return func(_ context.Context, _ db.Job, _ []db.MCPServer) (executor.ExecuteResult, error) {
+		return executor.ExecuteResult{Transcript: "done"}, nil
 	}
 }
 

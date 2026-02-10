@@ -6,12 +6,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"claude-schedule/internal/db"
 )
+
+// DebugDir, when non-empty, causes each CLI invocation's raw JSONL output
+// to be written to a timestamped file in that directory.
+var DebugDir string
 
 // baseArgs are the flags shared by every invocation.
 var baseArgs = []string{
@@ -24,13 +31,19 @@ var baseArgs = []string{
 // defaultTools are the built-in tools always allowed.
 var defaultTools = "Bash,Read,Write,Edit,WebFetch,WebSearch"
 
+// ExecuteResult holds the output and raw JSONL lines from a CLI invocation.
+type ExecuteResult struct {
+	Transcript string
+	RawLines   []string
+}
+
 // ClaudeExecute runs a job's prompt through the Claude Code CLI and returns the
 // response text. It tries to resume the job's previous session for continuity;
 // if no session exists yet it falls back to a fresh session.
-func ClaudeExecute(ctx context.Context, job db.Job, mcpServers []db.MCPServer) (string, error) {
+func ClaudeExecute(ctx context.Context, job db.Job, mcpServers []db.MCPServer) (ExecuteResult, error) {
 	mcpArgs, cleanup, err := buildMCPArgs(mcpServers)
 	if err != nil {
-		return "", fmt.Errorf("building MCP config: %w", err)
+		return ExecuteResult{}, fmt.Errorf("building MCP config: %w", err)
 	}
 	defer cleanup()
 
@@ -46,13 +59,62 @@ func ClaudeExecute(ctx context.Context, job db.Job, mcpServers []db.MCPServer) (
 
 	// Try resuming the previous session first.
 	args := append([]string{"-p", job.Prompt, "--resume", job.ID}, allBase...)
-	out, err := runClaude(ctx, args)
+	result, err := runClaude(ctx, args)
 	if err != nil && strings.Contains(err.Error(), "No conversation found") {
 		// First run for this job — start a fresh session.
 		args = append([]string{"-p", job.Prompt}, allBase...)
-		out, err = runClaude(ctx, args)
+		result, err = runClaude(ctx, args)
 	}
-	return out, err
+	return result, err
+}
+
+// ClaudeAnswer resumes a conversation with the user's answer to a question.
+func ClaudeAnswer(ctx context.Context, job db.Job, mcpServers []db.MCPServer, answer string) (ExecuteResult, error) {
+	mcpArgs, cleanup, err := buildMCPArgs(mcpServers)
+	if err != nil {
+		return ExecuteResult{}, fmt.Errorf("building MCP config: %w", err)
+	}
+	defer cleanup()
+
+	tools := defaultTools
+	for _, srv := range mcpServers {
+		tools += ",mcp__" + srv.Name + "__*"
+	}
+
+	allBase := append([]string{}, baseArgs...)
+	allBase = append(allBase, "--allowedTools", tools)
+	allBase = append(allBase, mcpArgs...)
+
+	args := append([]string{"-p", answer, "--resume", job.ID}, allBase...)
+	return runClaude(ctx, args)
+}
+
+// DetectQuestion scans raw JSONL lines for the last AskUserQuestion tool call
+// and returns the question JSON string (or empty if none found).
+func DetectQuestion(lines []string) string {
+	var lastQuestion string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var evt cliEvent
+		if err := json.Unmarshal([]byte(line), &evt); err != nil {
+			continue
+		}
+		if evt.Type != "assistant" || evt.Message == nil {
+			continue
+		}
+		for _, block := range evt.Message.Content {
+			if block.Type == "tool_use" && block.Name == "AskUserQuestion" && len(block.Input) > 0 {
+				var qi questionInput
+				if err := json.Unmarshal(block.Input, &qi); err == nil && len(qi.Questions) > 0 {
+					lastQuestion = string(block.Input)
+				}
+			}
+		}
+	}
+	return lastQuestion
 }
 
 // ---------------------------------------------------------------------------
@@ -107,7 +169,32 @@ func (tb *transcriptBuilder) writeText(text string) {
 	tb.hasContent = true
 }
 
+// questionInput matches the AskUserQuestion tool input shape.
+type questionInput struct {
+	Questions []questionItem `json:"questions"`
+}
+
+type questionItem struct {
+	Question string           `json:"question"`
+	Header   string           `json:"header"`
+	Options  []questionOption `json:"options"`
+}
+
+type questionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
 func (tb *transcriptBuilder) writeToolUse(name string, rawInput json.RawMessage) {
+	// Render AskUserQuestion tool calls as a styled question card.
+	if name == "AskUserQuestion" && len(rawInput) > 0 {
+		var qi questionInput
+		if err := json.Unmarshal(rawInput, &qi); err == nil && len(qi.Questions) > 0 {
+			tb.writeQuestion(qi)
+			return
+		}
+	}
+
 	tb.buf.WriteString(`<details style="margin:8px 0;border:1px solid #374151;border-radius:6px;overflow:hidden">`)
 	tb.buf.WriteString(`<summary style="cursor:pointer;padding:6px 10px;background:#1e293b;color:#60a5fa;font-size:13px;font-weight:600">`)
 	tb.buf.WriteString(`Tool: ` + name)
@@ -127,6 +214,33 @@ func (tb *transcriptBuilder) writeToolUse(name string, rawInput json.RawMessage)
 	}
 
 	tb.buf.WriteString("</details>\n\n")
+	tb.hasContent = true
+}
+
+func (tb *transcriptBuilder) writeQuestion(qi questionInput) {
+	for _, q := range qi.Questions {
+		tb.buf.WriteString(`<div style="margin:8px 0;padding:12px 16px;border:1px solid #f59e0b;border-radius:6px;background:#1c1917;color:#e2e8f0;font-size:13px;line-height:1.5">`)
+		tb.buf.WriteString(`<div style="color:#f59e0b;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">`)
+		if q.Header != "" {
+			tb.buf.WriteString(q.Header)
+		} else {
+			tb.buf.WriteString("Question")
+		}
+		tb.buf.WriteString(`</div>`)
+		tb.buf.WriteString(`<div style="margin-bottom:10px;font-size:14px">` + q.Question + `</div>`)
+		if len(q.Options) > 0 {
+			for _, opt := range q.Options {
+				tb.buf.WriteString(`<div style="margin:4px 0;padding:6px 10px;border:1px solid #374151;border-radius:4px;background:#0f172a">`)
+				tb.buf.WriteString(`<span style="color:#fbbf24;font-weight:600">` + opt.Label + `</span>`)
+				if opt.Description != "" {
+					tb.buf.WriteString(` <span style="color:#94a3b8;font-size:12px">— ` + opt.Description + `</span>`)
+				}
+				tb.buf.WriteString(`</div>`)
+			}
+		}
+		tb.buf.WriteString(`</div>`)
+		tb.buf.WriteString("\n\n")
+	}
 	tb.hasContent = true
 }
 
@@ -333,20 +447,20 @@ func extractError(lines []string) string {
 }
 
 // runClaude executes the claude CLI with stream-json output and builds a transcript.
-func runClaude(ctx context.Context, args []string) (string, error) {
+func runClaude(ctx context.Context, args []string) (ExecuteResult, error) {
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	hideWindow(cmd)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return "", fmt.Errorf("creating stdout pipe: %w", err)
+		return ExecuteResult{}, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("starting claude: %w", err)
+		return ExecuteResult{}, fmt.Errorf("starting claude: %w", err)
 	}
 
 	// Read all lines from stdout.
@@ -357,10 +471,12 @@ func runClaude(ctx context.Context, args []string) (string, error) {
 		lines = append(lines, scanner.Text())
 	}
 
+	dumpDebugLines(lines)
+
 	if err := cmd.Wait(); err != nil {
 		// Try to extract a human-readable error from the stream-json output.
 		if msg := extractError(lines); msg != "" {
-			return "", fmt.Errorf("%s", msg)
+			return ExecuteResult{}, fmt.Errorf("%s", msg)
 		}
 		// Build the most informative error we can from what's available.
 		stderrMsg := strings.TrimSpace(stderr.String())
@@ -376,17 +492,35 @@ func runClaude(ctx context.Context, args []string) (string, error) {
 		if len(parts) == 0 {
 			parts = append(parts, err.Error())
 		}
-		return "", fmt.Errorf("claude: %s", strings.Join(parts, "\n"))
+		return ExecuteResult{}, fmt.Errorf("claude: %s", strings.Join(parts, "\n"))
 	}
 
 	transcript := buildTranscript(lines)
 	if transcript == "" {
 		raw := strings.Join(lines, "\n")
 		if raw == "" {
-			return "", fmt.Errorf("empty response from claude")
+			return ExecuteResult{}, fmt.Errorf("empty response from claude")
 		}
-		return raw, nil
+		return ExecuteResult{Transcript: raw, RawLines: lines}, nil
 	}
 
-	return transcript, nil
+	return ExecuteResult{Transcript: transcript, RawLines: lines}, nil
+}
+
+// dumpDebugLines writes raw JSONL lines to a timestamped file in DebugDir.
+func dumpDebugLines(lines []string) {
+	if DebugDir == "" || len(lines) == 0 {
+		return
+	}
+	if err := os.MkdirAll(DebugDir, 0o755); err != nil {
+		log.Printf("debug: failed to create dir %s: %v", DebugDir, err)
+		return
+	}
+	name := fmt.Sprintf("run-%s.jsonl", time.Now().UTC().Format("20060102-150405"))
+	path := filepath.Join(DebugDir, name)
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		log.Printf("debug: failed to write %s: %v", path, err)
+	} else {
+		log.Printf("debug: wrote %d lines to %s", len(lines), path)
+	}
 }

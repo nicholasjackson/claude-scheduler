@@ -16,17 +16,18 @@ var validIntervalUnits = map[string]bool{
 
 // Job represents a scheduled job persisted in the database.
 type Job struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	StartDate     string `json:"startDate"`
-	IntervalValue int    `json:"intervalValue"`
-	IntervalUnit  string `json:"intervalUnit"`
-	Prompt        string `json:"prompt"`
-	Active        bool   `json:"active"`
-	NextRun       string `json:"nextRun"`
-	LastRun       string `json:"lastRun"`
-	Status        string `json:"status"`
-	Output        string `json:"output"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	StartDate       string `json:"startDate"`
+	IntervalValue   int    `json:"intervalValue"`
+	IntervalUnit    string `json:"intervalUnit"`
+	Prompt          string `json:"prompt"`
+	Active          bool   `json:"active"`
+	NextRun         string `json:"nextRun"`
+	LastRun         string `json:"lastRun"`
+	Status          string `json:"status"`
+	Output          string `json:"output"`
+	PendingQuestion string `json:"pendingQuestion"`
 }
 
 func validateJob(j Job) error {
@@ -42,7 +43,7 @@ func validateJob(j Job) error {
 // GetJobs returns all jobs sorted by name.
 func (s *Store) GetJobs() ([]Job, error) {
 	rows, err := s.db.Query(
-		"SELECT id, name, start_date, interval_value, interval_unit, prompt, active, next_run, last_run, status, output FROM jobs ORDER BY name")
+		"SELECT id, name, start_date, interval_value, interval_unit, prompt, active, next_run, last_run, status, output, pending_question FROM jobs ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +53,7 @@ func (s *Store) GetJobs() ([]Job, error) {
 	for rows.Next() {
 		var j Job
 		if err := rows.Scan(&j.ID, &j.Name, &j.StartDate, &j.IntervalValue, &j.IntervalUnit,
-			&j.Prompt, &j.Active, &j.NextRun, &j.LastRun, &j.Status, &j.Output); err != nil {
+			&j.Prompt, &j.Active, &j.NextRun, &j.LastRun, &j.Status, &j.Output, &j.PendingQuestion); err != nil {
 			return nil, err
 		}
 		jobs = append(jobs, j)
@@ -64,10 +65,10 @@ func (s *Store) GetJobs() ([]Job, error) {
 func (s *Store) GetJob(id string) (Job, error) {
 	var j Job
 	err := s.db.QueryRow(
-		"SELECT id, name, start_date, interval_value, interval_unit, prompt, active, next_run, last_run, status, output FROM jobs WHERE id = ?",
+		"SELECT id, name, start_date, interval_value, interval_unit, prompt, active, next_run, last_run, status, output, pending_question FROM jobs WHERE id = ?",
 		id,
 	).Scan(&j.ID, &j.Name, &j.StartDate, &j.IntervalValue, &j.IntervalUnit,
-		&j.Prompt, &j.Active, &j.NextRun, &j.LastRun, &j.Status, &j.Output)
+		&j.Prompt, &j.Active, &j.NextRun, &j.LastRun, &j.Status, &j.Output, &j.PendingQuestion)
 	return j, err
 }
 
@@ -83,10 +84,10 @@ func (s *Store) CreateJob(j Job) (Job, error) {
 		j.Status = "pending"
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO jobs (id, name, start_date, interval_value, interval_unit, prompt, active, next_run, last_run, status, output)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO jobs (id, name, start_date, interval_value, interval_unit, prompt, active, next_run, last_run, status, output, pending_question)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		j.ID, j.Name, j.StartDate, j.IntervalValue, j.IntervalUnit,
-		j.Prompt, j.Active, j.NextRun, j.LastRun, j.Status, j.Output,
+		j.Prompt, j.Active, j.NextRun, j.LastRun, j.Status, j.Output, j.PendingQuestion,
 	)
 	return j, err
 }
@@ -97,10 +98,10 @@ func (s *Store) UpdateJob(j Job) (Job, error) {
 		return j, err
 	}
 	result, err := s.db.Exec(
-		`UPDATE jobs SET name=?, start_date=?, interval_value=?, interval_unit=?, prompt=?, active=?, next_run=?, last_run=?, status=?, output=?
+		`UPDATE jobs SET name=?, start_date=?, interval_value=?, interval_unit=?, prompt=?, active=?, next_run=?, last_run=?, status=?, output=?, pending_question=?
 		 WHERE id=?`,
 		j.Name, j.StartDate, j.IntervalValue, j.IntervalUnit,
-		j.Prompt, j.Active, j.NextRun, j.LastRun, j.Status, j.Output, j.ID,
+		j.Prompt, j.Active, j.NextRun, j.LastRun, j.Status, j.Output, j.PendingQuestion, j.ID,
 	)
 	if err != nil {
 		return j, err
@@ -116,7 +117,7 @@ func (s *Store) UpdateJob(j Job) (Job, error) {
 // This handles the case where the app crashed or was killed mid-execution.
 func (s *Store) ResetRunningJobs() (int64, error) {
 	result, err := s.db.Exec(
-		`UPDATE jobs SET status='failed', output='interrupted: app was restarted' WHERE status='running'`,
+		`UPDATE jobs SET status='failed', output='interrupted: app was restarted', pending_question='' WHERE status IN ('running','waiting')`,
 	)
 	if err != nil {
 		return 0, err

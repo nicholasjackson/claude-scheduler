@@ -1,4 +1,4 @@
-export type JobStatus = "success" | "failed" | "running" | "pending";
+export type JobStatus = "success" | "failed" | "running" | "pending" | "waiting";
 
 export type IntervalUnit = "minutes" | "hours" | "days" | "weeks";
 
@@ -9,6 +9,7 @@ export interface JobRun {
   endedAt: string;
   status: JobStatus;
   output: string;
+  pendingQuestion: string;
 }
 
 export type MCPServerType = "http" | "stdio";
@@ -36,4 +37,5 @@ export interface ScheduledJob {
   lastRun: string;
   status: JobStatus;
   output: string;
+  pendingQuestion: string;
 }

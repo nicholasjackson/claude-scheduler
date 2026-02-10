@@ -134,6 +134,10 @@ func (s *Store) init() error {
 		return err
 	}
 
+	// Add pending_question columns for interactive question support.
+	s.db.Exec("ALTER TABLE jobs ADD COLUMN pending_question TEXT NOT NULL DEFAULT ''")
+	s.db.Exec("ALTER TABLE job_runs ADD COLUMN pending_question TEXT NOT NULL DEFAULT ''")
+
 	// Enable foreign key enforcement (SQLite has it off by default).
 	_, err = s.db.Exec("PRAGMA foreign_keys = ON")
 	return err

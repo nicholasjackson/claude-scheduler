@@ -63,6 +63,9 @@ func (a *App) sendNotification(jobName string, status string) {
 	case "failed":
 		title = "Job Failed"
 		body = jobName + " failed"
+	case "waiting":
+		title = "Job Needs Input"
+		body = jobName + " is waiting for your answer"
 	default:
 		return
 	}
@@ -152,4 +155,9 @@ func (a *App) SetJobMCPServers(jobID string, serverIDs []string) error {
 // RunJobNow triggers immediate execution of a job.
 func (a *App) RunJobNow(jobID string) error {
 	return a.sched.RunNow(jobID)
+}
+
+// AnswerQuestion sends the user's answer to a waiting job and resumes execution.
+func (a *App) AnswerQuestion(jobID string, answer string) error {
+	return a.sched.AnswerQuestion(jobID, answer)
 }
